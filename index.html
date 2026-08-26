@@ -1248,56 +1248,9 @@ async function loadAppData() {
 }
 
 function seedDemoData() {
-  const o1Id = uid(), o2Id = uid(), o3Id = uid();
-  state.owners = [
-    { id: o1Id, name: 'Rohan Sharma', isSelf: true, avatarColor: '#000000' },
-    { id: o2Id, name: 'Amit Verma', isSelf: false, avatarColor: '#276EF1' },
-    { id: o3Id, name: 'Priya Patel', isSelf: false, avatarColor: '#05944F' }
-  ];
-  state.selfOwnerId = o1Id;
-
-  const today = new Date();
-  const nextMonth = new Date(today);
-  nextMonth.setDate(today.getDate() + 25);
-  const nextMonthStr = nextMonth.toISOString().slice(0, 10);
-  const prevMonthStr = new Date(today.getFullYear(), today.getMonth() - 1, 10).toISOString().slice(0, 10);
-
-  state.properties = [
-    {
-      id: uid(),
-      name: 'Skyline Palms, Plot 42',
-      purchasePrice: 6000000, 
-      areaSqm: 200,
-      areaSqft: 200 * SQM_TO_SQFT,
-      currentSqftRate: 5800, 
-      owners: [
-        { id: o1Id, name: 'Rohan Sharma', joinDate: prevMonthStr, explicitSharePct: null },
-        { id: o2Id, name: 'Amit Verma', joinDate: prevMonthStr, explicitSharePct: null }
-      ],
-      tranches: [
-        {
-          id: uid(),
-          label: 'Token',
-          date: prevMonthStr,
-          status: 'paid',
-          contributions: [
-            { ownerId: o1Id, amount: 250000 },
-            { ownerId: o2Id, amount: 250000 }
-          ]
-        },
-        {
-          id: uid(),
-          label: 'Installment 1',
-          date: new Date(today.getFullYear(), today.getMonth(), 5).toISOString().slice(0, 10),
-          status: 'paid',
-          contributions: [
-            { ownerId: o1Id, amount: 1500000 },
-            { ownerId: o2Id, amount: 1000000 }
-          ]
-        }
-      ]
-    }
-  ];
+  state.owners = [];
+  state.properties = [];
+  state.selfOwnerId = null;
 }
 
 function migrateAll() {
