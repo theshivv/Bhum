@@ -1430,21 +1430,14 @@ function propProfitInfo(p) {
   const extraExpenses = (p.stampDuty || 0) + (p.govFees || 0);
   
   const val = propCurrentValuation(p);
-  const paid = propPaidTotal(p);
   
-  // Ratio of total obligation actually paid
-  const paidRatio = totalCost > 0 ? (paid / totalCost) : 0;
+  // Profit & ROI calculation based on full property value
+  const profit = state.deductFeesFromProfit ? (val - baseCost - extraExpenses) : (val - baseCost);
+  const costBasis = state.deductFeesFromProfit ? (baseCost + extraExpenses) : baseCost;
   
-  const proratedVal = val * paidRatio;
-  const proratedBaseCost = baseCost * paidRatio;
+  const roi = costBasis > 0 ? (profit / costBasis) * 100 : 0;
   
-  // Gross profit on the plot only (ignoring extra expenses)
-  const grossProfit = proratedVal - proratedBaseCost;
-  
-  // ROI on the plot investment
-  const roi = proratedBaseCost > 0 ? (grossProfit / proratedBaseCost) * 100 : 0;
-  
-  return { cost: totalCost, baseCost, extraExpenses, val, profit: grossProfit, roi };
+  return { cost: totalCost, baseCost, extraExpenses, val, profit, roi };
 }
 
 function ownerPaidTotal(p, ownerId, mode = null) {
@@ -1486,30 +1479,32 @@ function ownerSharePercent(p, ownerId) {
   // Fallback to auto equal split for unassigned or 'auto' modes
   const autoOwners = p.owners.filter(o => !o.shareMode || o.shareMode === 'auto');
   if (autoOwners.some(o => o.id === ownerId)) {
-    // Find how much percentage is taken by explicit owners
-    const explicitPctTaken = p.owners
-      .filter(o => o.shareMode && o.shareMode !== 'auto')
-      .reduce((s, o) => {
-        let pct = 0;
-        if (o.shareMode === 'pct') pct = Number(o.shareValue) || 0;
-        else if (o.shareMode === 'area') pct = p.areaSqft > 0 ? ((Number(o.shareValue) || 0) / p.areaSqft) * 100 : 0;
+    let unallocated = 100;
+    p.owners.forEach(o => {
+      if (o.shareMode && o.shareMode !== 'auto') {
+        if (o.shareMode === 'pct') unallocated -= (Number(o.shareValue)||0);
+        else if (o.shareMode === 'area') unallocated -= p.areaSqft > 0 ? ((Number(o.shareValue)||0) / p.areaSqft)*100 : 0;
         else if (o.shareMode === 'money') {
-          const c = propAcquisitionCost(p);
-          pct = c > 0 ? ((Number(o.shareValue) || 0) / c) * 100 : 0;
+          const cost = propAcquisitionCost(p);
+          unallocated -= cost > 0 ? ((Number(o.shareValue)||0)/cost)*100 : 0;
         } else if (o.shareMode === 'paid') {
-          const c = propAcquisitionCost(p);
-          const paid = ownerPaidTotal(p, o.id);
-          pct = c > 0 ? (paid / c) * 100 : 0;
+          const cost = propAcquisitionCost(p);
+          const pd = ownerPaidTotal(p, o.id);
+          unallocated -= cost > 0 ? (pd/cost)*100 : 0;
         } else if (o.shareMode === 'buyin') {
-          pct = p.areaSqft > 0 ? ((Number(o.shareValue) || 0) / p.areaSqft) * 100 : 0;
+          unallocated -= p.areaSqft > 0 ? ((Number(o.shareValue)||0)/p.areaSqft)*100 : 0;
         }
-        return s + pct;
-      }, 0);
-    
-    const remainingPct = Math.max(0, 100 - explicitPctTaken);
-    return autoOwners.length ? remainingPct / autoOwners.length : 0;
+      }
+    });
+    return Math.max(0, unallocated / (autoOwners.length || 1));
   }
   return 0;
+}
+
+function toggleDeductFees() {
+  state.deductFeesFromProfit = !state.deductFeesFromProfit;
+  saveAppData();
+  renderDetail();
 }
 
 function ownerDueInfoInProp(p, ownerId) {
@@ -2152,23 +2147,23 @@ function renderDetail() {
           ${initials(o.name)}
         </div>
         <div class="owner-info" style="flex:1;">
-          <div class="owner-title-row" style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="owner-title-row" style="display:flex; align-items:center;">
             <div>
               <span class="owner-name">${escapeHtml(o.name)}</span>
               ${isSelf ? '<span class="pill pill-blue" style="font-size:9.5px; padding:2px 6px;">You</span>' : ''}
               ${isOverride ? '<span class="pill pill-amber" style="font-size:9px; padding:2px 4px;">Locked %</span>' : ''}
             </div>
-            <button class="owner-edit-btn" onclick="deleteOwnerFromProp('${o.id}')" title="Remove Owner" style="color:var(--uber-red);">✕</button>
           </div>
           <div class="owner-stats-sub">Share: <b>${fmtNum(oSharePct)}%</b> (${fmtNum(oSqft)} sqft)</div>
           ${statsHTML}
         </div>
         <div class="owner-right" style="align-items:flex-end;">
+          <div style="display:flex; gap:12px; margin-bottom:8px;">
+            <button class="owner-edit-btn" onclick="openEditOwnerModal('${o.id}')" title="Edit Share">✎ Edit</button>
+            <button class="owner-edit-btn" onclick="deleteOwnerFromProp('${o.id}')" title="Remove Owner" style="color:var(--uber-red);">✕ Delete</button>
+          </div>
           <div class="owner-pct-val">${fmtMoney(oEquityVal)}</div>
           <div class="owner-profit-val">${oProfit >= 0 ? '+' : ''}${fmtMoney(oProfit)} profit</div>
-          <div style="margin-top:auto; display:flex; gap:6px;">
-            <button class="owner-edit-btn" onclick="openEditOwnerModal('${o.id}')" title="Edit Share">✎</button>
-          </div>
         </div>
       </div>`;
   }).join('') : '<div class="empty-state">No owners linked to this property yet.</div>';
@@ -2260,7 +2255,10 @@ function renderDetail() {
     <div class="hero-card dark-style">
       <div class="hero-eyebrow">
         <span>${escapeHtml(p.name.toUpperCase())}</span>
-        <button style="background:none; border:none; color:var(--uber-white); cursor:pointer; font-size:14px;" onclick="openEditProperty('${p.id}')">✎ Edit</button>
+        <div style="display:flex; gap:12px;">
+          <button style="background:none; border:none; color:var(--uber-white); cursor:pointer; font-size:14px;" onclick="openEditProperty('${p.id}')" title="Edit Property">✎ Edit</button>
+          <button style="background:none; border:none; color:#ff4d4d; cursor:pointer; font-size:14px;" onclick="deleteCurrentProperty()" title="Delete Property">🗑 Delete</button>
+        </div>
       </div>
       <div class="hero-val">${fmtMoney(pInfo.val)}</div>
       <div style="font-size:12px; color:#A6A6A6; margin-top:-4px;">Market Valuation (${fmtNum(p.areaSqft)} sq ft)</div>
@@ -2271,7 +2269,10 @@ function renderDetail() {
           <div class="hero-sub-v">${fmtMoney(pInfo.cost)}</div>
         </div>
         <div>
-          <div class="hero-sub-k">Gross Profit (Plot Only)</div>
+          <div class="hero-sub-k" style="cursor:pointer; display:inline-flex; align-items:center; gap:4px;" onclick="toggleDeductFees()" title="Tap to toggle extra fees deduction">
+            ${state.deductFeesFromProfit ? 'Net Profit (After Fees)' : 'Gross Profit (Plot Only)'}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--uber-gray-400);"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          </div>
           <div class="hero-sub-v ${pInfo.profit >= 0 ? 'green' : 'amber'}">
             ${pInfo.profit >= 0 ? '+' : ''}${fmtMoney(pInfo.profit)}
             <span style="font-size:12px; display:block; margin-top:2px;">${pInfo.profit >= 0 ? '+' : ''}${fmtNum(pInfo.roi)}% ROI</span>
@@ -2331,10 +2332,6 @@ function renderDetail() {
     <div style="display:flex; gap:10px; margin-top:10px;">
       <button class="btn btn-black" style="flex:1;" onclick="openTrancheModal()">+ Add Payment</button>
       <button class="btn btn-outline" style="flex:1;" onclick="openTransferModal()">+ Internal Settlement</button>
-    </div>
-
-    <div style="margin-top:32px; padding-top:16px; border-top:1px solid var(--uber-gray-200);">
-      <button class="btn btn-danger" onclick="deleteCurrentProperty()">Delete Property</button>
     </div>
   `;
   
