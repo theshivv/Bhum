@@ -679,13 +679,37 @@
       background: none;
       border: none;
       color: var(--uber-gray-400);
-      font-size: 16px;
+      font-size: 18px;
       cursor: pointer;
       margin-left: 6px;
+      padding: 4px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
     }
 
     .owner-edit-btn:hover {
       color: var(--uber-black);
+      background: var(--uber-gray-100);
+    }
+    
+    .owner-edit-btn.del:hover {
+      color: var(--uber-red);
+      background: var(--uber-red-bg);
+    }
+
+    .owner-card-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 10px;
+      font-size: 11px;
+    }
+    
+    .owner-card-stats > div {
+      flex: 1 1 calc(33.333% - 12px);
+      min-width: 80px;
     }
 
     /* Ledger Entry */
@@ -1284,8 +1308,29 @@
           <div style="font-size:11.5px; color:var(--uber-gray-600); margin-top:-6px; margin-bottom:14px;">Total Cost =
             Total Plot Price + Stamp Duty.</div>
 
-          <div class="form-group"
-            style="margin-top:16px; border-top:1px dashed var(--uber-gray-200); padding-top:16px;">
+          <div class="form-group" style="margin-top:16px; border-top:1px dashed var(--uber-gray-200); padding-top:16px;">
+            <label>Property Status</label>
+            <select id="np-status">
+              <option value="Just Looking">Just Looking</option>
+              <option value="Tokened">Tokened</option>
+              <option value="In Installment">In Installment</option>
+              <option value="Property Bought">Property Bought (Fully Paid)</option>
+              <option value="Sell Tokened">Sell Tokened</option>
+              <option value="Sell In Installment">Sell In Installment</option>
+              <option value="Property Sold">Property Sold</option>
+            </select>
+          </div>
+          <div class="form-row-2">
+            <div class="form-group">
+              <label>Current Owner (Seller)</label>
+              <input id="np-seller-name" placeholder="Name of seller">
+            </div>
+            <div class="form-group">
+              <label>Buyer Name (If selling)</label>
+              <input id="np-buyer-name" placeholder="Name of buyer">
+            </div>
+          </div>
+          <div class="form-group">
             <label>Property Final Sell Date (Optional)</label>
             <input id="np-sell-date" type="date">
             <div style="font-size:11.5px; color:var(--uber-gray-600); margin-top:4px;">Marking a sell date helps track
@@ -1366,10 +1411,9 @@
         <select id="ow-share-mode" onchange="toggleOwnerShareValueInput()">
           <option value="auto">Auto (Equal Split among remaining)</option>
           <option value="pct">Fixed Percentage (%)</option>
-          <option value="area">Plot Area (Sq. Ft.)</option>
-          <option value="money">Target Money Invested (₹)</option>
-          <option value="paid">Actual Money Paid (Dynamic %)</option>
-          <option value="buyin">Late Buy-In (Custom Area & Rate)</option>
+          <option value="area">Specific Area (Sq. Ft.)</option>
+          <option value="money">Target Investment (Money In Directly)</option>
+          <option value="paid">Dynamic (Based on Actual Paid Amount)</option>
         </select>
       </div>
       <div class="form-group" id="ow-share-value-group" style="display:none;">
@@ -1384,14 +1428,9 @@
       <!-- Cap Table Restructuring UI -->
       <div id="ow-funding-source-container"
         style="display:none; margin-top:16px; border-top:1px dashed var(--uber-gray-200); padding-top:16px;">
-        <label>Where is their equity coming from?</label>
-        <select id="ow-funding-type" onchange="toggleFundingSourceUI()">
-          <option value="none">New Equity (Dilute everyone proportionally)</option>
-          <option value="equal">Take equal percentage from everyone</option>
-          <option value="specific">Take specific percentages from specific owners</option>
-        </select>
-        <div id="ow-funding-specific-list"
-          style="display:none; margin-top:12px; display:flex; flex-direction:column; gap:8px;"></div>
+        <label>Who is giving up their equity? (Tick owners)</label>
+        <div style="font-size:11px; color:var(--uber-gray-600); margin-bottom:8px;">If none selected, dilutes everyone equally.</div>
+        <div id="ow-funding-checkboxes" style="display:flex; flex-direction:column; gap:8px;"></div>
       </div>
 
       <button class="btn btn-black" onclick="confirmAddPropertyOwner()">Save Owner</button>
@@ -1451,6 +1490,19 @@
 
       <button class="btn btn-black" onclick="confirmSaveTranche()">Save Payment</button>
       <button class="btn btn-outline" style="margin-top:8px;" onclick="closeModal('trancheModal')">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Modal: Owner Ledger History -->
+  <div class="modal-backdrop" id="ownerLedgerModal">
+    <div class="modal-sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title" id="ownerLedgerTitle">Owner Transaction History</div>
+      <div style="font-size:13px; color:var(--uber-gray-600); margin-bottom:16px;" id="ownerLedgerSubtitle"></div>
+      
+      <div id="ownerLedgerList" style="display:flex; flex-direction:column; gap:8px; max-height: 50vh; overflow-y: auto;"></div>
+
+      <button class="btn btn-outline" style="margin-top:16px;" onclick="closeModal('ownerLedgerModal')">Close</button>
     </div>
   </div>
 
@@ -1784,8 +1836,6 @@
           const explicitCost = propAcquisitionCost(p);
           const paid = ownerPaidTotal(p, ownerId);
           return explicitCost > 0 ? (paid / explicitCost) * 100 : 0;
-        } else if (ownerRecord.shareMode === 'buyin') {
-          return p.areaSqft > 0 ? ((Number(ownerRecord.shareValue) || 0) / p.areaSqft) * 100 : 0;
         }
       }
 
@@ -1804,8 +1854,6 @@
               const cost = propAcquisitionCost(p);
               const pd = ownerPaidTotal(p, o.id);
               unallocated -= cost > 0 ? (pd / cost) * 100 : 0;
-            } else if (o.shareMode === 'buyin') {
-              unallocated -= p.areaSqft > 0 ? ((Number(o.shareValue) || 0) / p.areaSqft) * 100 : 0;
             }
           }
         });
@@ -2217,6 +2265,9 @@
       document.getElementById('np-gov-fees').value = '0';
       document.getElementById('np-area-sqm').value = '';
       document.getElementById('np-area-sqft').value = '';
+      document.getElementById('np-status').value = 'Just Looking';
+      document.getElementById('np-seller-name').value = '';
+      document.getElementById('np-buyer-name').value = '';
       document.getElementById('np-sell-date').value = '';
       showView('add');
     }
@@ -2235,6 +2286,9 @@
       document.getElementById('np-gov-fees').value = '0';
       document.getElementById('np-area-sqm').value = p.areaSqm || '';
       document.getElementById('np-area-sqft').value = p.areaSqft || '';
+      document.getElementById('np-status').value = p.status || 'Just Looking';
+      document.getElementById('np-seller-name').value = p.sellerName || '';
+      document.getElementById('np-buyer-name').value = p.buyerName || '';
       document.getElementById('np-sell-date').value = p.sellDate || '';
       showView('add');
     }
@@ -2269,6 +2323,9 @@
       let sqm = Number(document.getElementById('np-area-sqm').value) || 0;
       let sqft = Number(document.getElementById('np-area-sqft').value) || 0;
       const rate = 0; // Legacy field removed from add UI
+      const status = document.getElementById('np-status').value;
+      const sellerName = document.getElementById('np-seller-name').value.trim();
+      const buyerName = document.getElementById('np-buyer-name').value.trim();
       const sellDate = document.getElementById('np-sell-date').value || null;
 
       if (!name) { alert('Please enter a property name'); return; }
@@ -2287,7 +2344,9 @@
           p.govFees = govFees;
           p.areaSqm = sqm;
           p.areaSqft = sqft;
-          // p.currentSqftRate is updated directly in detail view, don't overwrite here
+          p.status = status;
+          p.sellerName = sellerName;
+          p.buyerName = buyerName;
           p.sellDate = sellDate;
           saveAppData();
           openDetail(p.id);
@@ -2306,6 +2365,9 @@
           areaSqm: sqm,
           areaSqft: sqft,
           currentSqftRate: initialBuyRate,
+          status,
+          sellerName,
+          buyerName,
           sellDate,
           owners: [],
           tranches: []
@@ -2438,15 +2500,15 @@
         <div style="margin-top:8px; background:var(--uber-gray-100); border-radius:var(--radius-pill); height:4px; overflow:hidden;">
           <div style="width:${pctPaid}%; background:var(--uber-blue); height:100%;"></div>
         </div>
-        <div style="display:flex; justify-content:space-between; margin-top:10px;">
+        <div class="owner-card-stats">
           <div>
             <div style="font-size:10px; color:var(--uber-gray-400);">Paid Till Now</div>
             <div style="font-size:14px; font-weight:700;">${fmtMoney(oPaid)}</div>
           </div>
-          <div>
+          ${oDueInfo.total > 0 ? `<div>
             <div style="font-size:10px; color:var(--uber-amber);">Due Pay</div>
             <div style="font-size:14px; font-weight:700; color:var(--uber-amber);">${fmtMoney(oDueInfo.total)}</div>
-          </div>
+          </div>` : ''}
           <div>
             <div style="font-size:10px; color:var(--uber-gray-400);">Total Expected</div>
             <div style="font-size:14px; font-weight:700;">${fmtMoney(oExpectedTotal)}</div>
@@ -2455,7 +2517,7 @@
         }
 
         return `
-      <div class="owner-card">
+      <div class="owner-card" style="cursor:pointer;" onclick="openOwnerLedger('${o.id}')">
         <div class="owner-avatar ${isSelf ? 'self' : ''}" style="background:${(state.owners.find(x => x.id === o.id) || {}).avatarColor || '#000'}">
           ${initials(o.name)}
         </div>
@@ -2471,9 +2533,9 @@
           ${statsHTML}
         </div>
         <div class="owner-right" style="align-items:flex-end;">
-          <div style="display:flex; gap:12px; margin-bottom:8px;">
-            <button class="owner-edit-btn" onclick="openEditOwnerModal('${o.id}')" title="Edit Share">✎ Edit</button>
-            <button class="owner-edit-btn" onclick="deleteOwnerFromProp('${o.id}')" title="Remove Owner" style="color:var(--uber-red);">✕ Delete</button>
+          <div style="display:flex; gap:6px; margin-bottom:8px; justify-content:flex-end;">
+            <button class="owner-edit-btn" onclick="event.stopPropagation(); openEditOwnerModal('${o.id}')" title="Edit Share">✎</button>
+            <button class="owner-edit-btn del" onclick="event.stopPropagation(); deleteOwnerFromProp('${o.id}')" title="Remove Owner">✕</button>
           </div>
           <div class="owner-pct-val">${fmtMoney(oEquityVal)}</div>
           <div class="owner-profit-val">${oProfit >= 0 ? '+' : ''}${fmtMoney(oProfit)} profit</div>
@@ -2567,7 +2629,10 @@
     <!-- Top Hero Financial Card -->
     <div class="hero-card dark-style">
       <div class="hero-eyebrow">
-        <span>${escapeHtml(p.name.toUpperCase())}</span>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span>${escapeHtml(p.name.toUpperCase())}</span>
+          ${p.status ? `<span class="pill pill-blue" style="font-size:10px; padding:2px 6px;">${escapeHtml(p.status)}</span>` : ''}
+        </div>
         <div style="display:flex; gap:12px;">
           <button style="background:none; border:none; color:var(--uber-white); cursor:pointer; font-size:14px;" onclick="openEditProperty('${p.id}')" title="Edit Property">✎ Edit</button>
           <button style="background:none; border:none; color:#ff4d4d; cursor:pointer; font-size:14px;" onclick="deleteCurrentProperty()" title="Delete Property">🗑 Delete</button>
@@ -2575,6 +2640,11 @@
       </div>
       <div class="hero-val">${fmtMoney(pInfo.val)}</div>
       <div style="font-size:12px; color:#A6A6A6; margin-top:-4px;">Market Valuation (${fmtNum(p.areaSqft)} sq ft)</div>
+      ${(p.sellerName || p.buyerName) ? `<div style="font-size:11px; color:#A6A6A6; margin-top:2px;">
+        ${p.sellerName ? `Seller: <span style="color:#FFF;">${escapeHtml(p.sellerName)}</span>` : ''}
+        ${(p.sellerName && p.buyerName) ? ' | ' : ''}
+        ${p.buyerName ? `Buyer: <span style="color:#FFF;">${escapeHtml(p.buyerName)}</span>` : ''}
+      </div>` : ''}
 
       <div class="hero-grid-2">
         <div>
@@ -2879,6 +2949,7 @@
       const group = document.getElementById('ow-share-value-group');
       const label = document.getElementById('ow-share-value-label');
       const priceGroup = document.getElementById('ow-share-price-group');
+      const priceLabel = document.getElementById('ow-share-price-label');
 
       priceGroup.style.display = 'none';
 
@@ -2886,38 +2957,92 @@
         group.style.display = 'none';
       } else {
         group.style.display = 'block';
-        if (mode === 'pct') label.textContent = 'Percentage (%)';
-        else if (mode === 'area') label.textContent = 'Area (Sq. Ft.)';
-        else if (mode === 'money') label.textContent = 'Target Money Invested (₹)';
-        else if (mode === 'buyin') {
-          label.textContent = 'Area Buying (Sq. Ft.)';
+        if (mode === 'pct') {
+          label.textContent = 'Percentage (%)';
           priceGroup.style.display = 'block';
+          priceLabel.textContent = 'Optional Valuation (₹ Total) [Blank for default]';
+        } else if (mode === 'area') {
+          label.textContent = 'Area (Sq. Ft.)';
+          priceGroup.style.display = 'block';
+          priceLabel.textContent = 'Optional Rate (₹ / Sq. Ft.) [Blank for default]';
+        } else if (mode === 'money') {
+          label.textContent = 'Target Money Invested (₹)';
         }
       }
     }
 
-    function toggleFundingSourceUI() {
-      const type = document.getElementById('ow-funding-type').value;
-      const list = document.getElementById('ow-funding-specific-list');
-      const p = getCurrentProperty();
-
-      if (type === 'specific' && p) {
-        list.style.display = 'flex';
-        list.innerHTML = p.owners.map(o => {
-          return `
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <span style="font-size:13px; font-weight:600;">${escapeHtml(o.name)}</span>
-          <div style="display:flex; align-items:center; gap:6px;">
-            <span style="font-size:12px; color:var(--uber-gray-600);">Take</span>
-            <input type="number" inputmode="decimal" class="funding-deduct-input" data-owner-id="${o.id}" placeholder="0" style="width:60px; padding:4px 6px; font-size:12px; border:1px solid var(--uber-gray-300); border-radius:4px;">
-            <span style="font-size:12px; font-weight:700;">%</span>
-          </div>
-        </div>
-      `;
-        }).join('');
-      } else {
-        list.style.display = 'none';
+    function populateFundingCheckboxes(p) {
+      const container = document.getElementById('ow-funding-checkboxes');
+      container.innerHTML = '';
+      if (p && p.owners.length > 0) {
+        p.owners.forEach(o => {
+          container.innerHTML += `
+            <label style="display:flex; align-items:center; gap:8px; font-weight:normal; font-size:13px; cursor:pointer;">
+              <input type="checkbox" class="funding-source-cb" value="${o.id}">
+              ${escapeHtml(o.name)} (${fmtNum(ownerSharePercent(p, o.id))}%)
+            </label>
+          `;
+        });
       }
+    }
+
+    function openOwnerLedger(ownerId) {
+      const p = getCurrentProperty();
+      if (!p) return;
+      const o = p.owners.find(x => x.id === ownerId);
+      if (!o) return;
+
+      document.getElementById('ownerLedgerTitle').textContent = `${escapeHtml(o.name)}'s Ledger`;
+      document.getElementById('ownerLedgerSubtitle').textContent = `All payments and transfers involving this owner.`;
+
+      const list = document.getElementById('ownerLedgerList');
+      list.innerHTML = '';
+
+      let txs = [];
+      p.tranches.forEach(t => {
+        if (t.status !== 'paid') return;
+        const contribs = (t.contributions || []).filter(c => c.ownerId === ownerId && Number(c.amount) > 0);
+        if (contribs.length > 0) {
+          const totalPaid = contribs.reduce((s, c) => s + Number(c.amount), 0);
+          txs.push({ date: t.date || '', label: `Payment: ${t.label || 'Other'}`, amount: totalPaid, type: 'payment' });
+        }
+      });
+
+      if (p.transfers) {
+        p.transfers.forEach(tf => {
+          if (tf.fromOwnerId === ownerId) {
+            const toOwner = p.owners.find(x => x.id === tf.toOwnerId);
+            txs.push({ date: tf.date || '', label: `Internal Transfer (To ${toOwner ? toOwner.name : 'Unknown'})`, amount: Number(tf.amount || 0), type: 'transfer_out' });
+          } else if (tf.toOwnerId === ownerId) {
+            const fromOwner = p.owners.find(x => x.id === tf.fromOwnerId);
+            txs.push({ date: tf.date || '', label: `Internal Transfer (From ${fromOwner ? fromOwner.name : 'Unknown'})`, amount: -Number(tf.amount || 0), type: 'transfer_in' });
+          }
+        });
+      }
+
+      txs.sort((a, b) => b.date.localeCompare(a.date));
+
+      if (txs.length === 0) {
+        list.innerHTML = `<div class="empty-state">No transactions recorded for this owner yet.</div>`;
+      } else {
+        txs.forEach(tx => {
+          const isNegative = tx.amount < 0;
+          const displayAmt = Math.abs(tx.amount);
+          list.innerHTML += `
+            <div style="background:var(--uber-white); border:1px solid var(--uber-gray-200); border-radius:8px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="font-weight:700; font-size:14px; margin-bottom:4px;">${escapeHtml(tx.label)}</div>
+                <div style="font-size:12px; color:var(--uber-gray-600);">${tx.date ? formatDate(tx.date) : 'No Date'}</div>
+              </div>
+              <div style="font-weight:800; font-size:15px; color:${isNegative ? 'var(--uber-red)' : 'var(--uber-green)'};">
+                ${isNegative ? '-' : '+'}${fmtMoney(displayAmt)}
+              </div>
+            </div>
+          `;
+        });
+      }
+
+      document.getElementById('ownerLedgerModal').classList.add('active');
     }
 
     /* Add / Edit Owner Modal */
@@ -2937,8 +3062,7 @@
       const fundingContainer = document.getElementById('ow-funding-source-container');
       if (p && p.owners.length > 0) {
         fundingContainer.style.display = 'block';
-        document.getElementById('ow-funding-type').value = 'none';
-        toggleFundingSourceUI();
+        populateFundingCheckboxes(p);
       } else {
         fundingContainer.style.display = 'none';
       }
@@ -3022,42 +3146,32 @@
         let finalShareValue = shareValue;
 
         // Check if we need to deduct from others
-        const fundingTypeEl = document.getElementById('ow-funding-type');
-        const fundingType = fundingTypeEl ? fundingTypeEl.value : 'none';
-
-        if (fundingType === 'equal') {
-          const takePctRaw = prompt('How much percentage TOTAL should the new owner take? (e.g. 10)');
-          if (takePctRaw) {
-            const takePct = Number(takePctRaw);
-            if (takePct > 0 && p.owners.length > 0) {
-              const deductPerPerson = takePct / p.owners.length;
-              p.owners.forEach(existing => {
-                const currentPct = ownerSharePercent(p, existing.id);
-                existing.shareMode = 'pct';
-                existing.shareValue = Math.max(0, currentPct - deductPerPerson);
-              });
-              finalShareMode = 'pct';
-              finalShareValue = takePct;
-            }
+        const checkedCb = Array.from(document.querySelectorAll('.funding-source-cb:checked'));
+        if (checkedCb.length > 0) {
+          const checkedIds = checkedCb.map(cb => cb.value);
+          let takePct = finalShareValue || 0;
+          if (finalShareMode === 'area' && p.areaSqft > 0) {
+            takePct = (finalShareValue / p.areaSqft) * 100;
+          } else if (finalShareMode === 'money') {
+            const explicitCost = propAcquisitionCost(p);
+            takePct = explicitCost > 0 ? (finalShareValue / explicitCost) * 100 : 0;
+          } else if (finalShareMode === 'auto' || finalShareMode === 'paid') {
+            const raw = prompt('What % of equity is this new owner getting total? (e.g. 10)');
+            takePct = Number(raw) || 0;
           }
-        } else if (fundingType === 'specific') {
-          let totalTaken = 0;
-          document.querySelectorAll('.funding-deduct-input').forEach(inp => {
-            const deductVal = Number(inp.value) || 0;
-            if (deductVal > 0) {
-              const targetId = inp.dataset.ownerId;
-              const existing = p.owners.find(x => x.id === targetId);
+          
+          if (takePct > 0) {
+            const deductPerPerson = takePct / checkedIds.length;
+            checkedIds.forEach(id => {
+              const existing = p.owners.find(x => x.id === id);
               if (existing) {
                 const currentPct = ownerSharePercent(p, existing.id);
                 existing.shareMode = 'pct';
-                existing.shareValue = Math.max(0, currentPct - deductVal);
-                totalTaken += deductVal;
+                existing.shareValue = Math.max(0, currentPct - deductPerPerson);
               }
-            }
-          });
-          if (totalTaken > 0) {
+            });
             finalShareMode = 'pct';
-            finalShareValue = totalTaken;
+            finalShareValue = takePct;
           }
         }
 
