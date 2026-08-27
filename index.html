@@ -1664,6 +1664,42 @@
       }
 
       migrateAll();
+      
+      // Check for share URL
+      const params = new URLSearchParams(window.location.search);
+      const shareData = params.get('importProperty');
+      if (shareData) {
+        try {
+          const decoded = JSON.parse(atob(decodeURIComponent(shareData)));
+          if (decoded && decoded.id && decoded.name) {
+            if (confirm(`You have been invited to view/co-own property '${decoded.name}'. Do you want to import it?`)) {
+              // Check if property exists
+              const existingIdx = state.properties.findIndex(p => p.id === decoded.id);
+              if (existingIdx !== -1) {
+                state.properties[existingIdx] = decoded;
+              } else {
+                state.properties.push(decoded);
+              }
+              // Merge owners if any
+              if (decoded.owners && decoded.owners.length > 0) {
+                 decoded.owners.forEach(newOwner => {
+                    if (!state.owners.find(o => o.id === newOwner.id)) {
+                       state.owners.push(newOwner);
+                    }
+                 });
+              }
+              saveAppData();
+            }
+          }
+        } catch(e) {
+          console.error("Failed to import property", e);
+          alert("Invalid or corrupted share link.");
+        }
+        
+        // Remove param from URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
       renderApp();
     }
 
@@ -2692,6 +2728,7 @@
           ${p.status ? `<span class="pill pill-blue" style="font-size:10px; padding:2px 6px;">${escapeHtml(p.status)}</span>` : ''}
         </div>
         <div style="display:flex; gap:12px;">
+          <button style="background:none; border:none; color:var(--uber-white); cursor:pointer; font-size:14px;" onclick="shareProperty('${p.id}')" title="Share Property">🔗 Share</button>
           <button style="background:none; border:none; color:var(--uber-white); cursor:pointer; font-size:14px;" onclick="openEditProperty('${p.id}')" title="Edit Property">✎ Edit</button>
           <button style="background:none; border:none; color:#ff4d4d; cursor:pointer; font-size:14px;" onclick="deleteCurrentProperty()" title="Delete Property">🗑 Delete</button>
         </div>
@@ -2938,6 +2975,50 @@
       state.properties = state.properties.filter(p => p.id !== state.currentPropertyId);
       saveAppData();
       showView('properties');
+    }
+
+    async function shareProperty(propId) {
+      const p = state.properties.find(x => x.id === propId);
+      if (!p) return;
+      
+      try {
+        const payload = JSON.stringify(p);
+        const encoded = encodeURIComponent(btoa(payload));
+        const shareUrl = window.location.origin + window.location.pathname + '?importProperty=' + encoded;
+        
+        const shareData = {
+          title: `Bhum Property: ${p.name}`,
+          text: `You have been invited to view/co-own the property: ${p.name}`,
+          url: shareUrl
+        };
+
+        const clipboardText = `${shareData.text}\n\n${shareUrl}`;
+        const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+        try {
+          // 1. Always copy to clipboard
+          await navigator.clipboard.writeText(clipboardText);
+          
+          // 2. Open share sheet ONLY on mobile if supported
+          if (isMobile && navigator.share) {
+            try {
+              await navigator.share(shareData);
+            } catch (err) {
+              console.error('Error with share sheet:', err);
+              // Fallback to alert if they cancel or it fails, though usually silent is fine
+            }
+          } else {
+            // Desktop or no share sheet support
+            alert("Share details copied to clipboard! You can paste this in WhatsApp or SMS.");
+          }
+        } catch (err) {
+          console.error('Could not copy text: ', err);
+          alert("Failed to copy link. Check console.");
+        }
+      } catch(e) {
+        console.error("Failed to generate share link", e);
+        alert("Failed to generate share link.");
+      }
     }
 
     /* --- Modals & Sheets --- */
