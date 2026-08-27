@@ -1596,7 +1596,9 @@
       selfOwnerId: null,
       activeScope: 'my',
       currentPropertyId: null,
-      pendingTrStatus: 'paid'
+      pendingTrStatus: 'paid',
+      deductFeesFromProfit: true,
+      usePCPA: false
     };
 
     /* Formatters */
@@ -1605,7 +1607,7 @@
       if (n === 0 || n === -0) n = 0; // Fix -0
       return '₹' + n.toLocaleString('en-IN');
     }
-    function fmtNum(n, d = 1) {
+    function fmtNum(n, d = 3) {
       n = Number(n) || 0;
       if (n === 0 || n === -0) n = 0; // Fix -0
       return n.toLocaleString('en-IN', { maximumFractionDigits: d });
@@ -1635,6 +1637,12 @@
           state.properties = raw.properties || [];
           state.owners = raw.owners || [];
           state.selfOwnerId = raw.selfOwnerId || null;
+          if (raw.deductFeesFromProfit !== undefined) {
+            state.deductFeesFromProfit = raw.deductFeesFromProfit;
+          } else {
+            state.deductFeesFromProfit = true;
+          }
+          state.usePCPA = raw.usePCPA || false;
         } else {
           let legacyProps = null;
           if (window.storage && typeof window.storage.get === 'function') {
@@ -1800,9 +1808,28 @@
       const profit = state.deductFeesFromProfit ? (val - baseCost - extraExpenses) : (val - baseCost);
       const costBasis = state.deductFeesFromProfit ? (baseCost + extraExpenses) : baseCost;
 
-      const roi = costBasis > 0 ? (profit / costBasis) * 100 : 0;
+      let roi = costBasis > 0 ? (profit / costBasis) * 100 : 0;
+      
+      let pcpa = 0;
+      let firstDate = null;
+      (p.tranches || []).forEach(t => {
+        if (t.status === 'paid' && t.date) {
+           if (!firstDate || t.date < firstDate) firstDate = t.date;
+        }
+      });
+      if (firstDate) {
+         const start = new Date(firstDate);
+         const end = p.sellDate ? new Date(p.sellDate) : new Date();
+         let years = (end - start) / (1000 * 60 * 60 * 24 * 365.25);
+         if (years > 0) pcpa = roi / years;
+         else pcpa = roi; // if less than a day, just use roi
+      } else {
+         pcpa = roi;
+      }
 
-      return { cost: totalCost, baseCost, extraExpenses, val, profit, roi };
+      if (state.usePCPA) roi = pcpa;
+
+      return { cost: totalCost, baseCost, extraExpenses, val, profit, roi, pcpa };
     }
 
     function ownerPaidTotal(p, ownerId, mode = null) {
@@ -1868,6 +1895,13 @@
       renderDetail();
     }
 
+    function togglePCPA() {
+      state.usePCPA = !state.usePCPA;
+      saveAppData();
+      renderDashboard();
+      if (state.currentPropertyId) renderDetail();
+    }
+
     function ownerDueInfoInProp(p, ownerId) {
       const dues = p.tranches
         .filter(t => t.status === 'due' || t.status === 'projected')
@@ -1913,6 +1947,8 @@
       let ownedPropsCount = 0;
       let upcomingDues = [];
 
+      let weightedPcpaSum = 0;
+
       state.properties.forEach(p => {
         const isOwner = p.owners.some(o => o.id === ownerId);
         const paid = ownerPaidTotal(p, ownerId);
@@ -1925,10 +1961,12 @@
 
           const sharePct = ownerSharePercent(p, ownerId) / 100;
           const propVal = propCurrentValuation(p);
-          const propProfit = propProfitInfo(p).profit;
+          const pInfo = propProfitInfo(p);
+          const propProfit = pInfo.profit;
 
           totalCurrentVal += propVal * sharePct;
           totalProfit += propProfit * sharePct;
+          weightedPcpaSum += (pInfo.pcpa || 0) * paid;
 
           dueInfo.dues.forEach(d => {
             upcomingDues.push({
@@ -1943,7 +1981,10 @@
       });
 
       upcomingDues.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-      const roi = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
+      let roi = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
+      if (state.usePCPA) {
+         roi = totalInvested > 0 ? (weightedPcpaSum / totalInvested) : 0;
+      }
 
       return {
         totalInvested,
@@ -1962,13 +2003,16 @@
       let totalCurrentVal = 0;
       let totalProfit = 0;
       let upcomingDues = [];
+      let weightedPcpaSum = 0;
 
       state.properties.forEach(p => {
-        totalInvested += propPaidTotal(p);
+        const paid = propPaidTotal(p);
+        totalInvested += paid;
         totalDue += propDueTotal(p);
         const pInfo = propProfitInfo(p);
         totalCurrentVal += pInfo.val;
         totalProfit += pInfo.profit;
+        weightedPcpaSum += (pInfo.pcpa || 0) * paid;
 
         p.tranches.filter(t => t.status === 'due').forEach(t => {
           upcomingDues.push({
@@ -1982,7 +2026,10 @@
       });
 
       upcomingDues.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-      const roi = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
+      let roi = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
+      if (state.usePCPA) {
+         roi = totalInvested > 0 ? (weightedPcpaSum / totalInvested) : 0;
+      }
 
       return {
         totalInvested,
@@ -2069,8 +2116,11 @@
         heroVal.textContent = fmtMoney(stats.totalCurrentVal);
 
         const isProfit = stats.totalProfit >= 0;
-        heroProfitBadge.textContent = `${isProfit ? '+' : ''}${fmtNum(stats.roi)}% ROI`;
+        const labelStr = state.usePCPA ? '% PCPA' : '% ROI';
+        heroProfitBadge.textContent = `${isProfit ? '+' : ''}${fmtNum(stats.roi)}${labelStr}`;
         heroProfitBadge.className = `profit-badge ${isProfit ? '' : 'neg'}`;
+        heroProfitBadge.style.cursor = 'pointer';
+        heroProfitBadge.onclick = togglePCPA;
 
         heroK1.textContent = 'My Total Invested';
         heroV1.textContent = fmtMoney(stats.totalInvested);
@@ -2089,8 +2139,11 @@
         heroVal.textContent = fmtMoney(allStats.totalCurrentVal);
 
         const isProfit = allStats.totalProfit >= 0;
-        heroProfitBadge.textContent = `${isProfit ? '+' : ''}${fmtNum(allStats.roi)}% ROI`;
+        const labelStr = state.usePCPA ? '% PCPA' : '% ROI';
+        heroProfitBadge.textContent = `${isProfit ? '+' : ''}${fmtNum(allStats.roi)}${labelStr}`;
         heroProfitBadge.className = `profit-badge ${isProfit ? '' : 'neg'}`;
+        heroProfitBadge.style.cursor = 'pointer';
+        heroProfitBadge.onclick = togglePCPA;
 
         heroK1.textContent = 'Total Invested';
         heroV1.textContent = fmtMoney(allStats.totalInvested);
@@ -2200,15 +2253,20 @@
       const totalCost = pProfit.cost;
       const paidPct = totalCost > 0 ? (paid / totalCost) * 100 : 100;
 
+      const labelStr = state.usePCPA ? '% PCPA' : '% ROI';
+
       return `
     <div class="prop-card" onclick="openDetail('${p.id}')">
       <div class="prop-card-top">
         <div>
           <div class="prop-name">${escapeHtml(p.name)}</div>
-          <div class="prop-sub">${fmtNum(p.areaSqft)} sq ft (${fmtNum(p.areaSqm)} sq m)</div>
+          <div class="prop-sub">
+            ${p.status ? `<span class="pill pill-blue" style="font-size:9px; padding:2px 4px; margin-right:4px;">${escapeHtml(p.status)}</span>` : ''}
+            ${fmtNum(p.areaSqft)} sq ft (${fmtNum(p.areaSqm)} sq m)
+          </div>
         </div>
         <span class="pill ${pProfit.profit >= 0 ? 'pill-green' : 'pill-amber'}">
-          ${pProfit.profit >= 0 ? '+' : ''}${fmtNum(pProfit.roi)}% ROI
+          ${pProfit.profit >= 0 ? '+' : ''}${fmtNum(state.usePCPA ? (pProfit.pcpa || pProfit.roi) : pProfit.roi)}${labelStr}
         </span>
       </div>
 
@@ -2656,9 +2714,9 @@
             ${state.deductFeesFromProfit ? 'Net Profit (After Fees)' : 'Gross Profit (Plot Only)'}
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--uber-gray-400);"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
           </div>
-          <div class="hero-sub-v ${pInfo.profit >= 0 ? 'green' : 'amber'}">
+          <div class="hero-sub-v ${pInfo.profit >= 0 ? 'green' : 'amber'}" style="cursor:pointer;" onclick="togglePCPA()">
             ${pInfo.profit >= 0 ? '+' : ''}${fmtMoney(pInfo.profit)}
-            <span style="font-size:12px; display:block; margin-top:2px;">${pInfo.profit >= 0 ? '+' : ''}${fmtNum(pInfo.roi)}% ROI</span>
+            <span style="font-size:12px; display:block; margin-top:2px;" title="Tap to toggle PCPA/ROI">${pInfo.profit >= 0 ? '+' : ''}${fmtNum(state.usePCPA ? (pInfo.pcpa || pInfo.roi) : pInfo.roi)}${state.usePCPA ? '% PCPA' : '% ROI'}</span>
           </div>
         </div>
       </div>
