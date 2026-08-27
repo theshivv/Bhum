@@ -20,6 +20,7 @@
     gtag('config', 'G-V5YBLEPRYB');
   </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
   <style>
     :root {
       --uber-black: #000000;
@@ -1586,6 +1587,17 @@
     </div>
   </div>
 
+  <!-- Modal: Import Property -->
+  <div class="modal-backdrop" id="importModal">
+    <div class="modal-sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">Import Property</div>
+      <p style="font-size:13.5px; margin-bottom:16px;" id="importModalText"></p>
+      <button class="btn btn-primary" style="margin-bottom:8px;" id="btnImportConfirm">Import Property</button>
+      <button class="btn btn-outline" id="btnImportCancel">Cancel</button>
+    </div>
+  </div>
+
   <script>
     const SQM_TO_SQFT = 10.7639104;
     const OWNER_PALETTE = ['#000000', '#276EF1', '#05944F', '#733BE8', '#E26A00', '#D9381E', '#08BDBA', '#E040FB'];
@@ -1670,17 +1682,27 @@
       const shareData = params.get('importProperty');
       if (shareData) {
         try {
-          const decoded = JSON.parse(atob(decodeURIComponent(shareData)));
+          let jsonStr = '';
+          if (window.LZString && shareData.startsWith('lz:')) {
+             const cleanShareData = shareData.substring(3).replace(/ /g, '+').replace(/\s/g, '');
+             jsonStr = LZString.decompressFromEncodedURIComponent(cleanShareData);
+          } else {
+             const cleanShareData = decodeURIComponent(shareData).replace(/\s/g, '');
+             jsonStr = atob(cleanShareData);
+          }
+          const decoded = JSON.parse(jsonStr);
+          
           if (decoded && decoded.id && decoded.name) {
-            if (confirm(`You have been invited to view/co-own property '${decoded.name}'. Do you want to import it?`)) {
-              // Check if property exists
+            document.getElementById('importModalText').textContent = `You have been invited to view/co-own property '${decoded.name}'. Do you want to import it?`;
+            document.getElementById('importModal').classList.add('active');
+            
+            document.getElementById('btnImportConfirm').onclick = () => {
               const existingIdx = state.properties.findIndex(p => p.id === decoded.id);
               if (existingIdx !== -1) {
                 state.properties[existingIdx] = decoded;
               } else {
                 state.properties.push(decoded);
               }
-              // Merge owners if any
               if (decoded.owners && decoded.owners.length > 0) {
                  decoded.owners.forEach(newOwner => {
                     if (!state.owners.find(o => o.id === newOwner.id)) {
@@ -1689,15 +1711,20 @@
                  });
               }
               saveAppData();
-            }
+              document.getElementById('importModal').classList.remove('active');
+              window.history.replaceState({}, document.title, window.location.pathname);
+              renderApp();
+            };
+
+            document.getElementById('btnImportCancel').onclick = () => {
+              document.getElementById('importModal').classList.remove('active');
+              window.history.replaceState({}, document.title, window.location.pathname);
+            };
           }
         } catch(e) {
           console.error("Failed to import property", e);
-          alert("Invalid or corrupted share link.");
+          window.history.replaceState({}, document.title, window.location.pathname);
         }
-        
-        // Remove param from URL
-        window.history.replaceState({}, document.title, window.location.pathname);
       }
 
       renderApp();
@@ -2983,16 +3010,22 @@
       
       try {
         const payload = JSON.stringify(p);
-        const encoded = encodeURIComponent(btoa(payload));
+        let encoded = '';
+        if (window.LZString) {
+          encoded = encodeURIComponent('lz:' + LZString.compressToEncodedURIComponent(payload));
+        } else {
+          encoded = encodeURIComponent(btoa(payload));
+        }
+        
         const shareUrl = window.location.origin + window.location.pathname + '?importProperty=' + encoded;
         
         const shareData = {
           title: `Bhum Property: ${p.name}`,
-          text: `You have been invited to view/co-own the property: ${p.name}`,
+          text: `Bhum Property Invite: ${p.name}`,
           url: shareUrl
         };
 
-        const clipboardText = `${shareData.text}\n\n${shareUrl}`;
+        const clipboardText = `Bhum Property Invite: ${p.name}\n\nTap the link below to import:\n${shareUrl}`;
         const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
         try {
