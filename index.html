@@ -1610,7 +1610,7 @@
       currentPropertyId: null,
       pendingTrStatus: 'paid',
       deductFeesFromProfit: true,
-      usePCPA: false
+      usePCPA: true
     };
 
     /* Formatters */
@@ -1649,12 +1649,8 @@
           state.properties = raw.properties || [];
           state.owners = raw.owners || [];
           state.selfOwnerId = raw.selfOwnerId || null;
-          if (raw.deductFeesFromProfit !== undefined) {
-            state.deductFeesFromProfit = raw.deductFeesFromProfit;
-          } else {
-            state.deductFeesFromProfit = true;
-          }
-          state.usePCPA = raw.usePCPA || false;
+          state.deductFeesFromProfit = raw.deductFeesFromProfit !== undefined ? raw.deductFeesFromProfit : true;
+          state.usePCPA = raw.usePCPA !== undefined ? raw.usePCPA : true;
         } else {
           let legacyProps = null;
           if (window.storage && typeof window.storage.get === 'function') {
@@ -2617,6 +2613,17 @@
         let statsHTML = '';
         if (oExpectedTotal > 0 || explicitCost > 0) {
           const pctPaid = oExpectedTotal > 0 ? Math.min(100, Math.round((oPaid / oExpectedTotal) * 100)) || 0 : 0;
+          
+          const costRatio = pInfo.baseCost / (pInfo.baseCost + pInfo.extraExpenses || 1);
+          const feeRatio = pInfo.extraExpenses / (pInfo.baseCost + pInfo.extraExpenses || 1);
+          
+          const oPaidPlot = oPaid * costRatio;
+          const oPaidFees = oPaid * feeRatio;
+          const oDuePlot = oDueInfo.total * costRatio;
+          const oDueFees = oDueInfo.total * feeRatio;
+          const oExpPlot = oExpectedTotal * costRatio;
+          const oExpFees = oExpectedTotal * feeRatio;
+
           statsHTML = `
         <div style="margin-top:8px; background:var(--uber-gray-100); border-radius:var(--radius-pill); height:4px; overflow:hidden;">
           <div style="width:${pctPaid}%; background:var(--uber-blue); height:100%;"></div>
@@ -2625,14 +2632,17 @@
           <div>
             <div style="font-size:10px; color:var(--uber-gray-400);">Paid Till Now</div>
             <div style="font-size:14px; font-weight:700;">${fmtMoney(oPaid)}</div>
+            <div style="font-size:9px; color:var(--uber-gray-500); margin-top:2px;">Plot: ${fmtMoney(oPaidPlot)}<br>Fees: ${fmtMoney(oPaidFees)}</div>
           </div>
           ${oDueInfo.total > 0 ? `<div>
             <div style="font-size:10px; color:var(--uber-amber);">Due Pay</div>
             <div style="font-size:14px; font-weight:700; color:var(--uber-amber);">${fmtMoney(oDueInfo.total)}</div>
+            <div style="font-size:9px; color:var(--uber-gray-400); margin-top:2px;">Plot: ${fmtMoney(oDuePlot)}<br>Fees: ${fmtMoney(oDueFees)}</div>
           </div>` : ''}
           <div>
             <div style="font-size:10px; color:var(--uber-gray-400);">Total Expected</div>
             <div style="font-size:14px; font-weight:700;">${fmtMoney(oExpectedTotal)}</div>
+            <div style="font-size:9px; color:var(--uber-gray-500); margin-top:2px;">Plot: ${fmtMoney(oExpPlot)}<br>Fees: ${fmtMoney(oExpFees)}</div>
           </div>
         </div>`;
         }
@@ -2801,8 +2811,8 @@
       </div>
       <div class="mrb-metrics">
         <div>
-          <div class="pm-k">Acquisition Cost / Sq Ft</div>
-          <div class="pm-v">₹${fmtNum(p.areaSqft > 0 ? pInfo.cost / p.areaSqft : 0)} / sqft</div>
+          <div class="pm-k">Buy Rate / Sq Ft</div>
+          <div class="pm-v">₹${fmtNum(p.areaSqft > 0 ? pInfo.baseCost / p.areaSqft : 0)} <span style="font-size:11px; color:var(--uber-gray-400); font-weight:400;">(w/ fees: ₹${fmtNum(p.areaSqft > 0 ? pInfo.cost / p.areaSqft : 0)})</span></div>
         </div>
         <div>
           <div class="pm-k">Total Plot Area</div>
